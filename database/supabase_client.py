@@ -166,6 +166,80 @@ class Database:
         except Exception:
             return []
 
+    # ── Backups ───────────────────────────────────────────────────────────────
+
+    async def save_backup(
+        self,
+        guild_id: int,
+        guild_name: str,
+        label: str,
+        data: dict,
+        auto: bool = False,
+    ) -> str:
+        """Save a backup snapshot, return the generated UUID."""
+        import uuid, json
+        backup_id = str(uuid.uuid4())
+        try:
+            self._get_client().table("server_backups").insert({
+                "id": backup_id,
+                "guild_id": str(guild_id),
+                "guild_name": guild_name,
+                "label": label,
+                "auto": auto,
+                "data": json.dumps(data),   # store as text; cast back on read
+            }).execute()
+        except Exception as e:
+            log.error(f"save_backup error: {e}")
+        return backup_id
+
+    async def list_backups(self, guild_id: int) -> list[dict]:
+        """Return all backups for a guild, newest first (data field excluded)."""
+        try:
+            res = (
+                self._get_client().table("server_backups")
+                .select("id, guild_id, guild_name, label, auto, created_at")
+                .eq("guild_id", str(guild_id))
+                .order("created_at", desc=True)
+                .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            log.error(f"list_backups error: {e}")
+            return []
+
+    async def get_backup(self, guild_id: int, backup_id_prefix: str) -> dict | None:
+        """
+        Fetch a single backup by full or partial ID.
+        Returns dict with 'data' as parsed Python dict, or None.
+        """
+        import json as _json
+        try:
+            res = (
+                self._get_client().table("server_backups")
+                .select("*")
+                .eq("guild_id", str(guild_id))
+                .ilike("id", f"{backup_id_prefix}%")
+                .limit(1)
+                .execute()
+            )
+            if not res.data:
+                return None
+            row = res.data[0]
+            # data column may come back as string or dict depending on Supabase config
+            if isinstance(row["data"], str):
+                row["data"] = _json.loads(row["data"])
+            return row
+        except Exception as e:
+            log.error(f"get_backup error: {e}")
+            return None
+
+    async def delete_backup(self, backup_id: str) -> None:
+        """Delete a backup by full UUID."""
+        try:
+            self._get_client().table("server_backups").delete().eq("id", backup_id).execute()
+        except Exception as e:
+            log.error(f"delete_backup error: {e}")
+
 
 # Singleton — import this everywhere
 db = Database()
