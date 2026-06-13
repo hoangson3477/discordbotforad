@@ -210,25 +210,63 @@ class Database:
     async def get_backup(self, guild_id: int, backup_id_prefix: str) -> dict | None:
         """
         Fetch a single backup by full or partial ID.
+        UUID columns don't support ilike — we fetch all for this guild
+        then filter by startswith() in Python.
         Returns dict with 'data' as parsed Python dict, or None.
         """
         import json as _json
         try:
-            res = (
-                self._get_client().table("server_backups")
-                .select("*")
-                .eq("guild_id", str(guild_id))
-                .ilike("id", f"{backup_id_prefix}%")
-                .limit(1)
-                .execute()
-            )
+            client = self._get_client()
+            backup_id_prefix = backup_id_prefix.lower().strip()
+
+            # ── Full UUID: exact match is cheapest ────────────────────────────
+            if len(backup_id_prefix) == 36:
+                res = (
+                    client.table("server_backups")
+                    .select("*")
+                    .eq("guild_id", str(guild_id))
+                    .eq("id", backup_id_prefix)
+                    .limit(1)
+                    .execute()
+                )
+            else:
+                # ── Partial ID: fetch all for guild, filter in Python ─────────
+                # ilike on UUID type columns silently returns nothing in Supabase,
+                # so we pull id+label+auto+created_at first (no heavy data column),
+                # find the match, then fetch the full row by exact id.
+                meta_res = (
+                    client.table("server_backups")
+                    .select("id, guild_id, guild_name, label, auto, created_at")
+                    .eq("guild_id", str(guild_id))
+                    .order("created_at", desc=True)
+                    .execute()
+                )
+                rows = meta_res.data or []
+                match = next(
+                    (r for r in rows if r["id"].lower().startswith(backup_id_prefix)),
+                    None,
+                )
+                if not match:
+                    return None
+
+                # Now fetch full row (including data) by exact UUID
+                res = (
+                    client.table("server_backups")
+                    .select("*")
+                    .eq("guild_id", str(guild_id))
+                    .eq("id", match["id"])
+                    .limit(1)
+                    .execute()
+                )
+
             if not res.data:
                 return None
+
             row = res.data[0]
-            # data column may come back as string or dict depending on Supabase config
             if isinstance(row["data"], str):
                 row["data"] = _json.loads(row["data"])
             return row
+
         except Exception as e:
             log.error(f"get_backup error: {e}")
             return None
