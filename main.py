@@ -45,20 +45,30 @@ class MultiBot(commands.Bot):
     # ── Setup hook (runs before bot connects) ─────────────────────────────────
     async def setup_hook(self):
         await self.load_cogs()
-
-        # Sync slash commands
-        if Config.GUILD_ID:
-            guild = discord.Object(id=Config.GUILD_ID)
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)
-            log.info(f"🔄 Synced commands to guild {Config.GUILD_ID}")
-        else:
-            await self.tree.sync()
-            log.info("🔄 Synced commands globally")
+        # Không sync ở đây vì self.guilds chưa có khi setup_hook chạy
 
     async def on_ready(self):
         log.info(f"🤖 Logged in as {self.user} (ID: {self.user.id})")
         log.info(f"📡 Connected to {len(self.guilds)} guild(s)")
+
+        # Sync instant vào tất cả guild
+        synced_count = 0
+        for guild in self.guilds:
+            try:
+                self.tree.copy_global_to(guild=guild)
+                await self.tree.sync(guild=guild)
+                synced_count += 1
+                log.info(f"✅ Synced: {guild.name} ({guild.id})")
+                await asyncio.sleep(0.5)
+            except discord.Forbidden:
+                log.warning(f"⚠️ No permission: {guild.name}")
+            except discord.HTTPException as e:
+                log.error(f"❌ HTTPException {guild.name}: {e.status} {e.text}")
+            except Exception as e:
+                log.error(f"❌ Failed {guild.name}: {e}")
+
+        log.info(f"🔄 Synced {synced_count}/{len(self.guilds)} guilds")
+
         await self.change_presence(
             activity=discord.Activity(
                 type=discord.ActivityType.watching,
@@ -67,8 +77,15 @@ class MultiBot(commands.Bot):
         )
 
     async def on_guild_join(self, guild: discord.Guild):
-        log.info(f"➕ Joined guild: {guild.name} (ID: {guild.id})")
-        # Initialize guild settings in DB
+        log.info(f"➕ Joined: {guild.name} ({guild.id})")
+        # Sync instant khi bot vào server mới
+        try:
+            self.tree.copy_global_to(guild=guild)
+            await self.tree.sync(guild=guild)
+            log.info(f"✅ Synced new guild: {guild.name}")
+        except Exception as e:
+            log.error(f"❌ Sync failed for new guild {guild.name}: {e}")
+        # Init DB
         from database.supabase_client import db
         await db.init_guild(guild.id, guild.name)
 
