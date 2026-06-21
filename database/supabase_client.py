@@ -278,6 +278,156 @@ class Database:
         except Exception as e:
             log.error(f"delete_backup error: {e}")
 
+    # ── Lobby: games list ────────────────────────────────────────────────────
+
+    async def add_lobby_game(self, guild_id: int, name: str, emoji: str = "🎮") -> bool:
+        """Add a game to the dropdown list. Returns False if it already exists."""
+        try:
+            self._get_client().table("lobby_games").insert({
+                "guild_id": str(guild_id),
+                "name": name,
+                "emoji": emoji,
+            }).execute()
+            return True
+        except Exception as e:
+            log.error(f"add_lobby_game error: {e}")
+            return False
+
+    async def remove_lobby_game(self, guild_id: int, name: str) -> bool:
+        try:
+            res = (
+                self._get_client().table("lobby_games")
+                .delete()
+                .eq("guild_id", str(guild_id))
+                .eq("name", name)
+                .execute()
+            )
+            return bool(res.data)
+        except Exception as e:
+            log.error(f"remove_lobby_game error: {e}")
+            return False
+
+    async def list_lobby_games(self, guild_id: int) -> list[dict]:
+        try:
+            res = (
+                self._get_client().table("lobby_games")
+                .select("*")
+                .eq("guild_id", str(guild_id))
+                .order("name")
+                .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            log.error(f"list_lobby_games error: {e}")
+            return []
+
+    # ── Lobby: panel (permanent embed message) ──────────────────────────────
+
+    async def set_lobby_panel(
+        self, guild_id: int, channel_id: int, message_id: int, category_id: int | None
+    ) -> None:
+        try:
+            self._get_client().table("lobby_panels").upsert({
+                "guild_id": str(guild_id),
+                "channel_id": str(channel_id),
+                "message_id": str(message_id),
+                "category_id": str(category_id) if category_id else None,
+            }, on_conflict="guild_id").execute()
+        except Exception as e:
+            log.error(f"set_lobby_panel error: {e}")
+
+    async def get_lobby_panel(self, guild_id: int) -> dict | None:
+        try:
+            res = (
+                self._get_client().table("lobby_panels")
+                .select("*")
+                .eq("guild_id", str(guild_id))
+                .single()
+                .execute()
+            )
+            return res.data or None
+        except Exception:
+            return None
+
+    async def get_all_lobby_panels(self) -> list[dict]:
+        """Used on bot startup to re-register persistent Views for every guild."""
+        try:
+            res = self._get_client().table("lobby_panels").select("*").execute()
+            return res.data or []
+        except Exception as e:
+            log.error(f"get_all_lobby_panels error: {e}")
+            return []
+
+    # ── Lobby: active lobby tracking ─────────────────────────────────────────
+
+    async def create_active_lobby(
+        self,
+        guild_id: int,
+        owner_id: int,
+        voice_channel_id: int | None,
+        text_channel_id: int | None,
+        game_name: str,
+        max_users: int | None,
+    ) -> str:
+        import uuid
+        lobby_id = str(uuid.uuid4())
+        try:
+            self._get_client().table("active_lobbies").insert({
+                "id": lobby_id,
+                "guild_id": str(guild_id),
+                "owner_id": str(owner_id),
+                "voice_channel_id": str(voice_channel_id) if voice_channel_id else None,
+                "text_channel_id": str(text_channel_id) if text_channel_id else None,
+                "game_name": game_name,
+                "max_users": max_users,
+            }).execute()
+        except Exception as e:
+            log.error(f"create_active_lobby error: {e}")
+        return lobby_id
+
+    async def delete_active_lobby(self, lobby_id: str) -> None:
+        try:
+            self._get_client().table("active_lobbies").delete().eq("id", lobby_id).execute()
+        except Exception as e:
+            log.error(f"delete_active_lobby error: {e}")
+
+    async def get_active_lobby_by_channel(self, channel_id: int) -> dict | None:
+        """Find a lobby record by either its voice or text channel ID."""
+        try:
+            client = self._get_client()
+            res = (
+                client.table("active_lobbies")
+                .select("*")
+                .eq("voice_channel_id", str(channel_id))
+                .limit(1)
+                .execute()
+            )
+            if res.data:
+                return res.data[0]
+            res = (
+                client.table("active_lobbies")
+                .select("*")
+                .eq("text_channel_id", str(channel_id))
+                .limit(1)
+                .execute()
+            )
+            return res.data[0] if res.data else None
+        except Exception as e:
+            log.error(f"get_active_lobby_by_channel error: {e}")
+            return None
+
+    async def list_active_lobbies(self, guild_id: int) -> list[dict]:
+        try:
+            res = (
+                self._get_client().table("active_lobbies")
+                .select("*")
+                .eq("guild_id", str(guild_id))
+                .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            log.error(f"list_active_lobbies error: {e}")
+            return []
 
 # Singleton — import this everywhere
 db = Database()
