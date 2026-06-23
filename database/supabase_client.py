@@ -368,6 +368,7 @@ class Database:
         text_channel_id: int | None,
         game_name: str,
         max_users: int | None,
+        lobby_type: str | None = None,
     ) -> str:
         import uuid
         lobby_id = str(uuid.uuid4())
@@ -380,10 +381,29 @@ class Database:
                 "text_channel_id": str(text_channel_id) if text_channel_id else None,
                 "game_name": game_name,
                 "max_users": max_users,
+                "lobby_type": lobby_type,
             }).execute()
         except Exception as e:
             log.error(f"create_active_lobby error: {e}")
         return lobby_id
+
+    async def update_active_lobby_messages(
+        self,
+        lobby_id: str,
+        lobby_message_id: int | None,
+        announcement_channel_id: int | None,
+        announcement_message_id: int | None,
+    ) -> None:
+        """Store message IDs of the in-lobby embed and the announcement embed
+        so they can be edited later (e.g. to refresh the live member count)."""
+        try:
+            self._get_client().table("active_lobbies").update({
+                "lobby_message_id": str(lobby_message_id) if lobby_message_id else None,
+                "announcement_channel_id": str(announcement_channel_id) if announcement_channel_id else None,
+                "announcement_message_id": str(announcement_message_id) if announcement_message_id else None,
+            }).eq("id", lobby_id).execute()
+        except Exception as e:
+            log.error(f"update_active_lobby_messages error: {e}")
 
     async def delete_active_lobby(self, lobby_id: str) -> None:
         try:

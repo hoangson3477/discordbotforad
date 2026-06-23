@@ -22,6 +22,7 @@ class MultiBot(commands.Bot):
         intents.message_content = True
         intents.members = True
         intents.guilds = True
+        intents.voice_states = True   # bắt buộc để on_voice_state_update hoạt động
 
         super().__init__(
             command_prefix=commands.when_mentioned_or("!"),
