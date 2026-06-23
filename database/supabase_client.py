@@ -280,13 +280,31 @@ class Database:
 
     # ── Lobby: games list ────────────────────────────────────────────────────
 
-    async def add_lobby_game(self, guild_id: int, name: str, emoji: str = "🎮") -> bool:
+    async def get_lobby_game(self, guild_id: int, name: str) -> dict | None:
+        """Fetch a single game record by name."""
+        try:
+            res = (
+                self._get_client().table("lobby_games")
+                .select("*")
+                .eq("guild_id", str(guild_id))
+                .eq("name", name)
+                .single()
+                .execute()
+            )
+            return res.data or None
+        except Exception:
+            return None
+ 
+    async def add_lobby_game(
+        self, guild_id: int, name: str, emoji: str = "🎮", role_id: int | None = None
+    ) -> bool:
         """Add a game to the dropdown list. Returns False if it already exists."""
         try:
             self._get_client().table("lobby_games").insert({
                 "guild_id": str(guild_id),
-                "name": name,
-                "emoji": emoji,
+                "name":     name,
+                "emoji":    emoji,
+                "role_id":  str(role_id) if role_id else None,
             }).execute()
             return True
         except Exception as e:
@@ -324,18 +342,28 @@ class Database:
     # ── Lobby: panel (permanent embed message) ──────────────────────────────
 
     async def set_lobby_panel(
-        self, guild_id: int, channel_id: int, message_id: int, category_id: int | None
+        self,
+        guild_id: int,
+        channel_id: int,
+        message_id: int,
+        category_id: int | None,
+        announcement_channel_id: int | None = None,
+        roles_channel_id: int | None = None,
+        roles_message_id: int | None = None,
     ) -> None:
         try:
             self._get_client().table("lobby_panels").upsert({
-                "guild_id": str(guild_id),
-                "channel_id": str(channel_id),
-                "message_id": str(message_id),
-                "category_id": str(category_id) if category_id else None,
+                "guild_id":                str(guild_id),
+                "channel_id":              str(channel_id),
+                "message_id":              str(message_id),
+                "category_id":             str(category_id) if category_id else None,
+                "announcement_channel_id": str(announcement_channel_id) if announcement_channel_id else None,
+                "roles_channel_id":        str(roles_channel_id) if roles_channel_id else None,
+                "roles_message_id":        str(roles_message_id) if roles_message_id else None,
             }, on_conflict="guild_id").execute()
         except Exception as e:
             log.error(f"set_lobby_panel error: {e}")
-
+ 
     async def get_lobby_panel(self, guild_id: int) -> dict | None:
         try:
             res = (
@@ -360,6 +388,16 @@ class Database:
 
     # ── Lobby: active lobby tracking ─────────────────────────────────────────
 
+    async def update_lobby_slots(self, lobby_id: str, slots: list) -> None:
+        """Update the slots JSON for an active lobby."""
+        import json
+        try:
+            self._get_client().table("active_lobbies").update({
+                "slots": slots,   # Supabase handles list→jsonb automatically
+            }).eq("id", lobby_id).execute()
+        except Exception as e:
+            log.error(f"update_lobby_slots error: {e}")
+ 
     async def create_active_lobby(
         self,
         guild_id: int,
@@ -369,24 +407,30 @@ class Database:
         game_name: str,
         max_users: int | None,
         lobby_type: str | None = None,
+        strategy: str | None = None,
+        note: str | None = None,
+        slots: list | None = None,
     ) -> str:
         import uuid
         lobby_id = str(uuid.uuid4())
         try:
             self._get_client().table("active_lobbies").insert({
-                "id": lobby_id,
-                "guild_id": str(guild_id),
-                "owner_id": str(owner_id),
+                "id":               lobby_id,
+                "guild_id":         str(guild_id),
+                "owner_id":         str(owner_id),
                 "voice_channel_id": str(voice_channel_id) if voice_channel_id else None,
-                "text_channel_id": str(text_channel_id) if text_channel_id else None,
-                "game_name": game_name,
-                "max_users": max_users,
-                "lobby_type": lobby_type,
+                "text_channel_id":  str(text_channel_id)  if text_channel_id  else None,
+                "game_name":        game_name,
+                "max_users":        max_users,
+                "lobby_type":       lobby_type,
+                "strategy":         strategy,
+                "note":             note,
+                "slots":            slots or [],
             }).execute()
         except Exception as e:
             log.error(f"create_active_lobby error: {e}")
         return lobby_id
-
+    
     async def update_active_lobby_messages(
         self,
         lobby_id: str,
