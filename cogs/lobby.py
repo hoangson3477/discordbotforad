@@ -12,7 +12,7 @@ from utils import embeds
 
 log = logging.getLogger("lobby")
 
-LOBBY_CATEGORY_NAME = "「🎮 𝙎ả𝙣𝙝 𝙜𝙖𝙢𝙚」"
+LOBBY_CATEGORY_NAME = "「🎮 𝙂𝙖𝙢𝙚 𝙃𝙖𝙡𝙡」"
 MAX_GAMES_IN_DROPDOWN = 24          # Discord select limit is 25; reserve 1 slot for "Khác"
 SIZE_OPTIONS = [2, 3, 4, 5, 6, 8, 10, 0]   # 0 == unlimited
 
