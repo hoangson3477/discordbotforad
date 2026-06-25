@@ -492,6 +492,209 @@ class Database:
         except Exception as e:
             log.error(f"list_active_lobbies error: {e}")
             return []
+        
+    # ── Nations ───────────────────────────────────────────────────────────────
+
+    async def get_nation(self, user_id: int, guild_id: int) -> dict | None:
+        try:
+            res = (
+                self._get_client().table("nations")
+                .select("*")
+                .eq("user_id", str(user_id))
+                .eq("guild_id", str(guild_id))
+                .single()
+                .execute()
+            )
+            return res.data or None
+        except Exception:
+            return None
+
+    async def create_nation(self, user_id: int, guild_id: int, name: str) -> bool:
+        try:
+            self._get_client().table("nations").insert({
+                "user_id":  str(user_id),
+                "guild_id": str(guild_id),
+                "name":     name,
+            }).execute()
+            # Init all building slots at level 0
+            building_types = [
+                "bank", "oil", "factory", "farm",
+                "parliament", "warehouse", "military_base", "defense"
+            ]
+            rows = [
+                {"user_id": str(user_id), "guild_id": str(guild_id), "type": t}
+                for t in building_types
+            ]
+            self._get_client().table("nation_buildings").insert(rows).execute()
+            return True
+        except Exception as e:
+            log.error(f"create_nation error: {e}")
+            return False
+
+    async def update_nation(self, user_id: int, guild_id: int, **fields) -> None:
+        if not fields:
+            return
+        try:
+            self._get_client().table("nations").update(fields)\
+                .eq("user_id", str(user_id))\
+                .eq("guild_id", str(guild_id))\
+                .execute()
+        except Exception as e:
+            log.error(f"update_nation error: {e}")
+
+    async def delete_nation(self, user_id: int, guild_id: int) -> None:
+        try:
+            uid, gid = str(user_id), str(guild_id)
+            self._get_client().table("nation_diplomacy")\
+                .delete()\
+                .eq("guild_id", gid)\
+                .or_(f"from_user.eq.{uid},to_user.eq.{uid}")\
+                .execute()
+            self._get_client().table("nation_buildings")\
+                .delete()\
+                .eq("user_id", uid).eq("guild_id", gid)\
+                .execute()
+            self._get_client().table("nations")\
+                .delete()\
+                .eq("user_id", uid).eq("guild_id", gid)\
+                .execute()
+        except Exception as e:
+            log.error(f"delete_nation error: {e}")
+
+    async def list_nations(self, guild_id: int) -> list[dict]:
+        try:
+            res = (
+                self._get_client().table("nations")
+                .select("*")
+                .eq("guild_id", str(guild_id))
+                .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            log.error(f"list_nations error: {e}")
+            return []
+
+    # ── Buildings ─────────────────────────────────────────────────────────────
+
+    async def get_buildings(self, user_id: int, guild_id: int) -> list[dict]:
+        try:
+            res = (
+                self._get_client().table("nation_buildings")
+                .select("*")
+                .eq("user_id", str(user_id))
+                .eq("guild_id", str(guild_id))
+                .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            log.error(f"get_buildings error: {e}")
+            return []
+
+    async def start_upgrade(
+        self, user_id: int, guild_id: int, btype: str, finish_at: str
+    ) -> None:
+        try:
+            self._get_client().table("nation_buildings").update({
+                "is_upgrading": True,
+                "finish_at":    finish_at,
+            }).eq("user_id", str(user_id))\
+              .eq("guild_id", str(guild_id))\
+              .eq("type", btype)\
+              .execute()
+        except Exception as e:
+            log.error(f"start_upgrade error: {e}")
+
+    async def finish_upgrade(self, user_id: int, guild_id: int, btype: str, new_level: int) -> None:
+        try:
+            self._get_client().table("nation_buildings").update({
+                "level":        new_level,
+                "is_upgrading": False,
+                "finish_at":    None,
+            }).eq("user_id", str(user_id))\
+              .eq("guild_id", str(guild_id))\
+              .eq("type", btype)\
+              .execute()
+        except Exception as e:
+            log.error(f"finish_upgrade error: {e}")
+
+    # ── Diplomacy ─────────────────────────────────────────────────────────────
+
+    async def create_diplomacy(
+        self,
+        from_user: int, to_user: int, guild_id: int,
+        dtype: str, payload: dict | None = None,
+    ) -> int:
+        try:
+            res = self._get_client().table("nation_diplomacy").insert({
+                "from_user": str(from_user),
+                "to_user":   str(to_user),
+                "guild_id":  str(guild_id),
+                "type":      dtype,
+                "payload":   payload or {},
+            }).execute()
+            return res.data[0]["id"] if res.data else -1
+        except Exception as e:
+            log.error(f"create_diplomacy error: {e}")
+            return -1
+
+    async def update_diplomacy_status(self, diplo_id: int, status: str) -> None:
+        try:
+            self._get_client().table("nation_diplomacy")\
+                .update({"status": status})\
+                .eq("id", diplo_id)\
+                .execute()
+        except Exception as e:
+            log.error(f"update_diplomacy_status error: {e}")
+
+    async def get_diplomacy(self, diplo_id: int) -> dict | None:
+        try:
+            res = (
+                self._get_client().table("nation_diplomacy")
+                .select("*")
+                .eq("id", diplo_id)
+                .single()
+                .execute()
+            )
+            return res.data or None
+        except Exception:
+            return None
+
+    async def get_active_diplomacy(
+        self, user_id: int, guild_id: int, dtype: str
+    ) -> list[dict]:
+        """Get accepted diplomacy records of a given type involving a user."""
+        try:
+            uid = str(user_id)
+            res = (
+                self._get_client().table("nation_diplomacy")
+                .select("*")
+                .eq("guild_id", str(guild_id))
+                .eq("type", dtype)
+                .eq("status", "accepted")
+                .or_(f"from_user.eq.{uid},to_user.eq.{uid}")
+                .execute()
+            )
+            return res.data or []
+        except Exception as e:
+            log.error(f"get_active_diplomacy error: {e}")
+            return []
+
+    async def are_allies(self, user_a: int, user_b: int, guild_id: int) -> bool:
+        try:
+            a, b = str(user_a), str(user_b)
+            res = (
+                self._get_client().table("nation_diplomacy")
+                .select("id")
+                .eq("guild_id", str(guild_id))
+                .eq("type", "alliance")
+                .eq("status", "accepted")
+                .or_(f"and(from_user.eq.{a},to_user.eq.{b}),and(from_user.eq.{b},to_user.eq.{a})")
+                .limit(1)
+                .execute()
+            )
+            return bool(res.data)
+        except Exception:
+            return False
 
 # Singleton — import this everywhere
 db = Database()

@@ -26,7 +26,7 @@ def _empty_slots(max_users: int | None) -> list:
  
 def _slot_line(i: int, slot: dict | None) -> str:
     if slot is None:
-        return f"`#{i+1}` │ Còn trống..."
+        return f"`#{i+1}` │  Đang đợi"
     return f"`#{i+1}` │ ✅ <@{slot['user_id']}>"
  
  
@@ -49,9 +49,9 @@ def _is_full(slots: list) -> bool:
  
 def _type_label(lobby_type: str) -> str:
     return {
-        "voice": "Kênh voice",
-        "text":  "Kênh chat",
-        "both":  "Cả voice + chat",
+        "voice": "Voice",
+        "text":  "Chat",
+        "both":  "Voice và chat",
     }.get(lobby_type, lobby_type)
  
  
@@ -62,31 +62,31 @@ def _build_lobby_embed(guild: discord.Guild, lobby: dict) -> discord.Embed:
     color = embeds.Color.ERROR if is_full else embeds.Color.SUCCESS
     title = lobby["game_name"] + ("  🔴 ĐÃ ĐẦY" if is_full else "")
  
-    e = discord.Embed(title=f"⭐  {title}", color=color)
-    e.add_field(name="👤  Leader", value=f"<@{lobby['owner_id']}>", inline=True)
+    e = discord.Embed(title=f"{title}", color=color)
+    e.add_field(name="Chủ lobby", value=f"<@{lobby['owner_id']}>", inline=True)
  
     if lobby.get("strategy"):
-        e.add_field(name="🎮  Strategy", value=lobby["strategy"], inline=True)
+        e.add_field(name="Chiến thuật", value=lobby["strategy"], inline=True)
     if lobby.get("lobby_type"):
-        e.add_field(name="🔊  Loại", value=_type_label(lobby["lobby_type"]), inline=True)
+        e.add_field(name="Loại", value=_type_label(lobby["lobby_type"]), inline=True)
  
     if slots:
         e.add_field(
-            name="👥  Current Team",
+            name="Đội hiện tại",
             value="\n".join(_slot_line(i, s) for i, s in enumerate(slots)),
             inline=False,
         )
  
     if lobby.get("note"):
-        e.add_field(name="💬  Note", value=lobby["note"], inline=False)
+        e.add_field(name="💬  Ghi chú/Lưu ý", value=lobby["note"], inline=False)
  
     links = []
     if lobby.get("voice_channel_id"):
-        links.append(f"🔊 <#{lobby['voice_channel_id']}>")
+        links.append(f"<#{lobby['voice_channel_id']}>")
     if lobby.get("text_channel_id"):
-        links.append(f"💬 <#{lobby['text_channel_id']}>")
+        links.append(f"<#{lobby['text_channel_id']}>")
     if links:
-        e.add_field(name="📍  Lobby", value="  ".join(links), inline=False)
+        e.add_field(name="Lobby", value="  ".join(links), inline=False)
  
     e.set_footer(text="Bấm Join để vào slot • Chủ phòng hoặc Mod có thể đóng lobby")
     return e
@@ -135,6 +135,18 @@ def _can_close_lobby(member: discord.Member, owner_id: int) -> bool:
  
  
 async def _get_or_create_lobby_category(guild: discord.Guild) -> discord.CategoryChannel:
+    """
+    Ưu tiên dùng category_id đã lưu từ /lobby setup.
+    Fallback: tìm theo tên → tạo mới nếu không có.
+    """
+    panel = await db.get_lobby_panel(guild.id)
+    if panel and panel.get("category_id"):
+        cat = guild.get_channel(int(panel["category_id"]))
+        if isinstance(cat, discord.CategoryChannel):
+            return cat
+        # category_id trong DB nhưng channel không còn tồn tại → fallthrough
+ 
+    # Fallback: tìm theo tên cố định
     cat = discord.utils.get(guild.categories, name=LOBBY_CATEGORY_NAME)
     if cat is None:
         cat = await guild.create_category(LOBBY_CATEGORY_NAME, reason="Lobby system setup")
@@ -293,7 +305,7 @@ class LobbyDetailsModal(discord.ui.Modal, title="Chi tiết Lobby"):
     )
     note = discord.ui.TextInput(
         label="Note (yêu cầu thêm)",
-        placeholder="VD: cần biết chơi Voidcore, có mic, rank Diamond+...",
+        placeholder="VD: cần biết chơi Voidcore, có mic, rank Kim cương đổ lên",
         max_length=150, required=False,
     )
  
@@ -681,7 +693,7 @@ class Lobby(commands.Cog):
             description=(
                 "Bấm **Tạo Lobby** để mở phòng riêng cho game bạn muốn chơi.\n\n"
                 "Bạn sẽ chọn:\n"
-                "🎯 Game  ·  🔊 Loại phòng  ·  👥 Số người  ·  📝 Strategy & Note"
+                "Game muốn chơi ·  Loại phòng  ·  Số người tham gia  ·  Chiến thuật / Ghi chú\n\n"
             ),
             color=embeds.Color.INFO,
         )
@@ -700,7 +712,7 @@ class Lobby(commands.Cog):
         roles_view.role_select.max_values = max(1, len(options))
  
         roles_embed = discord.Embed(
-            title="🎮  Chọn Role Ping Game",
+            title="Chọn Role Ping Game",
             description=(
                 "Chọn game bên dưới để **nhận role ping** tương ứng.\n"
                 "Khi có lobby mới, bot sẽ ping role đó trong party-pings.\n\n"
